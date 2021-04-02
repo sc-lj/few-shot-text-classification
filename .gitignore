@@ -1,0 +1,12 @@
+/log
+data/*
+!data/toutiao.txt
+!data/char_vector.txt
+/classify_log
+/bert_chinese_base
+/.vscode
+/Amazon_few_shot
+*.pt
+*.pth
+__pycache__
+/handout
