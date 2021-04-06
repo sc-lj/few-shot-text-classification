@@ -57,10 +57,10 @@ class BertEncoder(BertModel):
         self.num_support_per_class = num_support_per_class
         self.output_dim = output_dim
         self.num_support = num_classes * num_support_per_class
-        self.fc1 = nn.Linear(self.config.hidden_size, output_dim)
-        self.fc2 = nn.Linear(output_dim, output_dim)
-        torch.nn.init.xavier_normal_(self.fc1.weight)
-        torch.nn.init.xavier_normal_(self.fc2.weight)
+        # self.fc1 = nn.Linear(self.config.hidden_size, output_dim)
+        # self.fc2 = nn.Linear(output_dim, output_dim)
+        # torch.nn.init.xavier_normal_(self.fc1.weight)
+        # torch.nn.init.xavier_normal_(self.fc2.weight)
         self.init_weights()
     
     def attention(self, x):
@@ -77,8 +77,9 @@ class BertEncoder(BertModel):
 
 
     def forward(self,x):
-        sequence_output,*_ = super().forward(input_ids=x)
-        outputs = self.attention(sequence_output)  # (batch=k*c, hidden)
+        sequence_output,pooled_output = super().forward(input_ids=x)
+        # outputs = self.attention(sequence_output)  # (batch=k*c, hidden)
+        outputs = pooled_output
         # (c*s, 2*hidden_size), (c*q, hidden_size)
         support, query = outputs[0: self.num_support], outputs[self.num_support:]
         return support, query
@@ -147,20 +148,27 @@ class Relation(nn.Module):
 
 
 class FewShotInduction(nn.Module):
-    def __init__(self, C, S, vocab_size, embed_size, hidden_size, d_a,
-                 iterations, outsize,pretrain_path=None, weights=None):
+    def __init__(self, C, S, vocab_size,config,weights=None):
         """
         C: number class
         S: support set
         """
         super(FewShotInduction, self).__init__()
-        self.encoder = BertEncoder.from_pretrained(pretrain_path,num_classes=C, num_support_per_class=S,output_dim=d_a)
-        self.induction = Induction(C, S, self.encoder.config.hidden_size, iterations)
-        self.relation = Relation(C, self.encoder.config.hidden_size, outsize)
+        embed_size=int(config['model']['embed_dim'])
+        hidden_size=int(config['model']['hidden_dim'])
+        d_a=int(config['model']['d_a'])
+        iterations=int(config['model']['iterations'])
+        outsize=int(config['model']['relation_dim'])
+        pretrain_path = config['data']['pretrain_path']
+        if config['data']['encoder'] == 'lstm':
+            self.encoder = Encoder(C, S, vocab_size, embed_size, hidden_size, d_a, weights)
+            hidden_size = 2*hidden_size
+        else:
+            self.encoder = BertEncoder.from_pretrained(pretrain_path,num_classes=C, num_support_per_class=S,output_dim=d_a)
+            hidden_size = self.encoder.config.hidden_size
 
-        # self.encoder = Encoder(C, S, vocab_size, embed_size, hidden_size, d_a, weights)
-        # self.induction = Induction(C, S, 2 * hidden_size, iterations)
-        # self.relation = Relation(C, 2 * hidden_size, outsize)
+        self.induction = Induction(C, S, hidden_size, iterations)
+        self.relation = Relation(C,  hidden_size, outsize)
 
     def forward(self, x):
         support_encoder, query_encoder = self.encoder(x)  # (k*c, 2*hidden_size)

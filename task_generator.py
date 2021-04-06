@@ -11,6 +11,7 @@ from torch.utils.data.sampler import Sampler
 import copy
 import Constants
 from Util import count_doc, counter2dict, load_weights, sentence2indices
+from transformers.tokenization_bert import BertTokenizer
 
 # omniglot_character_folders
 def get_data(path = "data/midea.txt"):
@@ -84,17 +85,19 @@ class ClassifyTask(object):
 
 class FewShotDataset(Dataset):
 
-    def __init__(self, task, word2index, max_len):
+    def __init__(self, task, word2index,config):
         # self.transform = transform # Torch operations on the input image
         # self.target_transform = target_transform
         self.task = task
+        self.config = config
         # self.split = split
         self.word2index = word2index
-        self.max_len = max_len
+        self.max_len = int(config["data"]["window"])
         # self.image_roots = self.task.train_roots if self.split == 'train' else self.task.test_roots
         # self.labels = self.task.train_labels if self.split == 'train' else self.task.test_labels
         self.image_roots = self.task.train_roots+self.task.test_roots
         self.labels = self.task.train_labels+self.task.test_labels
+        self.tokenizer = BertTokenizer.from_pretrained(config['data']['pretrain_path'])
 
     def __len__(self):
         return len(self.image_roots)
@@ -110,7 +113,10 @@ class Omniglot(FewShotDataset):
 
     def __getitem__(self, idx):
         line = self.image_roots[idx]
-        image = sentence2indices(line, self.word2index, self.max_len, Constants.PAD)
+        if self.config['data']['encoder'] == 'lstm':
+            image = sentence2indices(line, self.word2index, self.max_len, Constants.PAD)
+        else:
+            image = self.tokenizer.encode(line,max_length=self.max_len,pad_to_max_length=True)
         label = self.labels[idx]
         return torch.tensor(image), label
 
@@ -167,10 +173,10 @@ class ClassBalancedSampler(Sampler):
         return 1
 
 
-def get_data_loader(task,word2index,config, num_per_class=1, shuffle=True):
+def get_data_loader(task,word2index,config, shuffle=True):
     # NOTE: batch size here is # instances PER CLASS  split, word2index, max_len
-    dataset = Omniglot(task, word2index=word2index,max_len=int(config["data"]["window"]))
-
+    dataset = Omniglot(task, word2index=word2index,config=config)
+    num_per_class=int(config["model"]["support"])+int(config["model"]["query"])
     per_class_number = task.class_number['train']
     # sampler = ClassBalancedSampler(num_per_class, task.num_classes, task.train_num,class_number=per_class_number, shuffle=shuffle)
     loader = DataLoader(dataset, batch_size=num_per_class * task.num_classes,

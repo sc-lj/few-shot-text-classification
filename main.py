@@ -11,13 +11,14 @@ from tensorboardX import SummaryWriter
 from task_generator import get_data,ClassifyTask, get_data_loader
 from Util import load_weights
 from utils import save_pkl
+from torch.optim.lr_scheduler import StepLR
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '7'
+os.environ['CUDA_VISIBLE_DEVICES'] = '5'
 
 def train(episode):
     model.train()
     task = ClassifyTask(train_data, config["model"]["class"], int(config["model"]["support"]),int(config["model"]["query"]))
-    sample_dataloader = get_data_loader(task,word2index, config, num_per_class=int(config["model"]["support"])+int(config["model"]["query"]),shuffle=False)
+    sample_dataloader = get_data_loader(task,word2index, config,shuffle=False)
     data, target = sample_dataloader.__iter__().next()
     data = data.to(device)
     target = target.to(device)
@@ -27,6 +28,7 @@ def train(episode):
     loss, acc = criterion(predict, target)
     loss.backward()
     optimizer.step()
+    scheduler.step()
 
     writer.add_scalar('train_loss', loss.item(), episode)
     writer.add_scalar('train_acc', acc, episode)
@@ -39,7 +41,7 @@ def dev(episode):
     correct = 0.
     count = 0.
     task = ClassifyTask(dev_data, config["model"]["class"], int(config["model"]["support"]), int(config["model"]["query"]))
-    dev_loader = get_data_loader(task,word2index, config, num_per_class=int(config["model"]["support"])+int(config["model"]["query"]),shuffle=False)
+    dev_loader = get_data_loader(task,word2index, config, shuffle=False)
     for data, target in dev_loader:
         with torch.no_grad():
             data = data.to(device)
@@ -126,15 +128,12 @@ if __name__ == "__main__":
     model = FewShotInduction(C=int(config['model']['class']),
                              S=support,
                              vocab_size=len(word2index),
-                             embed_size=int(config['model']['embed_dim']),
-                             hidden_size=int(config['model']['hidden_dim']),
-                             d_a=int(config['model']['d_a']),
-                             iterations=int(config['model']['iterations']),
-                             outsize=int(config['model']['relation_dim']),
-                             pretrain_path = "bert_chinese_base",
-                             weights=weights).to(device)
+                             config = config,
+                             weights=weights,
+                             ).to(device)
     optimizer = optim.Adam(model.parameters(), lr=float(config['model']['lr']))
     criterion = Criterion(way=int(config['model']['class']), shot=int(config['model']['support']))
+    scheduler = StepLR(optimizer, step_size=500, gamma=0.98)
     
 
     # writer
@@ -142,3 +141,4 @@ if __name__ == "__main__":
     writer = SummaryWriter(config['model']['log_path'])
     main()
     writer.close()
+
