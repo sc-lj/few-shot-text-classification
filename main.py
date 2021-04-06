@@ -118,7 +118,7 @@ if __name__ == "__main__":
     # weights = pickle.load(open(os.path.join(config['data']['path'], config['data']['weights']), 'rb'))    
     weights = load_weights(word2index,"data/char_vector.txt")
     
-    save_pkl("./word2index_weight.pkl",(word2index,weights))
+    save_pkl("./data/word2index_weight.pkl",(word2index,weights))
     
     # model & optimizer & criterion
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -131,6 +131,7 @@ if __name__ == "__main__":
                              d_a=int(config['model']['d_a']),
                              iterations=int(config['model']['iterations']),
                              outsize=int(config['model']['relation_dim']),
+                             pretrain_path = "bert_chinese_base",
                              weights=weights).to(device)
     optimizer = optim.Adam(model.parameters(), lr=float(config['model']['lr']))
     criterion = Criterion(way=int(config['model']['class']), shot=int(config['model']['support']))

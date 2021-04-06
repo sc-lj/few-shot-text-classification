@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from transformers.modeling_bert import BertModel
 
 
 class Encoder(nn.Module):
@@ -46,6 +47,39 @@ class Encoder(nn.Module):
         outputs, _ = self.bilstm(x, (h, c))  # (batch=k*c,seq_len,2*hidden)
         outputs = self.attention(outputs)  # (batch=k*c, 2*hidden)
         # (c*s, 2*hidden_size), (c*q, 2*hidden_size)
+        support, query = outputs[0: self.num_support], outputs[self.num_support:]
+        return support, query
+
+class BertEncoder(BertModel):
+    def __init__(self,config,num_classes, num_support_per_class,output_dim):
+        super(BertEncoder,self).__init__(config)
+        self.num_classes = num_classes
+        self.num_support_per_class = num_support_per_class
+        self.output_dim = output_dim
+        self.num_support = num_classes * num_support_per_class
+        self.fc1 = nn.Linear(self.config.hidden_size, output_dim)
+        self.fc2 = nn.Linear(output_dim, output_dim)
+        torch.nn.init.xavier_normal_(self.fc1.weight)
+        torch.nn.init.xavier_normal_(self.fc2.weight)
+        self.init_weights()
+    
+    def attention(self, x):
+        weights = torch.tanh(self.fc1(x))
+        weights = self.fc2(weights)  # (batch=k*c, seq_len, d_a)
+        batch, seq_len, d_a = weights.shape
+        weights = weights.transpose(1, 2)  # (batch=k*c, d_a, seq_len)
+        weights = weights.contiguous().view(-1, seq_len)
+        weights = F.softmax(weights, dim=1).view(batch, d_a, seq_len)
+        sentence_embeddings = torch.bmm(weights, x)  # (batch=k*c, d_a, hidden)
+        # sentence_embeddings = weights @ x  # batch_size*r*lstm_hid_dim @表示矩阵-向量乘法
+        avg_sentence_embeddings = torch.mean(sentence_embeddings, dim=1)  # (batch, hidden)
+        return avg_sentence_embeddings
+
+
+    def forward(self,x):
+        sequence_output,*_ = super().forward(input_ids=x)
+        outputs = self.attention(sequence_output)  # (batch=k*c, hidden)
+        # (c*s, 2*hidden_size), (c*q, hidden_size)
         support, query = outputs[0: self.num_support], outputs[self.num_support:]
         return support, query
 
@@ -114,15 +148,19 @@ class Relation(nn.Module):
 
 class FewShotInduction(nn.Module):
     def __init__(self, C, S, vocab_size, embed_size, hidden_size, d_a,
-                 iterations, outsize, weights=None):
+                 iterations, outsize,pretrain_path=None, weights=None):
         """
         C: number class
         S: support set
         """
         super(FewShotInduction, self).__init__()
-        self.encoder = Encoder(C, S, vocab_size, embed_size, hidden_size, d_a, weights)
-        self.induction = Induction(C, S, 2 * hidden_size, iterations)
-        self.relation = Relation(C, 2 * hidden_size, outsize)
+        self.encoder = BertEncoder.from_pretrained(pretrain_path,num_classes=C, num_support_per_class=S,output_dim=d_a)
+        self.induction = Induction(C, S, self.encoder.config.hidden_size, iterations)
+        self.relation = Relation(C, self.encoder.config.hidden_size, outsize)
+
+        # self.encoder = Encoder(C, S, vocab_size, embed_size, hidden_size, d_a, weights)
+        # self.induction = Induction(C, S, 2 * hidden_size, iterations)
+        # self.relation = Relation(C, 2 * hidden_size, outsize)
 
     def forward(self, x):
         support_encoder, query_encoder = self.encoder(x)  # (k*c, 2*hidden_size)

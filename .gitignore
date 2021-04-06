@@ -10,3 +10,4 @@ data/*
 *.pth
 __pycache__
 /handout
+log.txt
